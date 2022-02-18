@@ -1,11 +1,13 @@
 import { Bot, InlineKeyboard } from "grammy";
+import { hydrateFiles } from "@grammyjs/files";
 import { config } from "dotenv";
 import nedb from "nedb";
 import { dirname } from "path";
-
+//! USE Grammy ROUTER API!!!!!!!!!!!!!!!
 // setups
-const __dirname = dirname("");
 config();
+const bot = new Bot(process.env.TOKEN);
+bot.api.config.use(hydrateFiles(process.env.TOKEN));
 
 //dataBases
 const Admins = new nedb("./db/Admins.db");
@@ -18,10 +20,22 @@ const headAdmins = process.env.ADMINS.split(",");
 let tempState = {};
 const Permissions = ["Add-Admins", "Send-Global"];
 
-const bot = new Bot(process.env.TOKEN);
+// gets file format (.pdf / .zip / ...)
+function getFileFormat(ctx) {
+  const dotsSplits = ctx.message.document.file_name.split(".");
+  return dotsSplits[dotsSplits.length - 1];
+}
+
+//TODO : make this event WORK!
+bot.on(":file", async (ctx) => {
+  const file = await ctx.getFile();
+  const path = await file.download(
+    "files/" + ctx.message.date + "." + getFileFormat(ctx)
+  );
+});
+
 bot.command("start", async (ctx) => {
   Admins.findOne({ ID: Number.parseInt(ctx.from.id) }, async (err, doc) => {
-    console.log(doc);
     if (doc || headAdmins.some((c) => c == ctx.from.id)) {
       await ctx.reply(
         `ادمین عزیز برای استفاده از بات گزینه های زی  ر را انتخاب کنید`,
@@ -46,6 +60,7 @@ bot.command("start", async (ctx) => {
     });
   }
 });
+
 // keyboards
 const adminKeyBoard = new InlineKeyboard()
   .text("وررود به پنل مدریت", "panel")
@@ -54,9 +69,12 @@ const adminKeyBoard = new InlineKeyboard()
 
 const panelKeyBord = new InlineKeyboard()
   .text("مدریت ادمین ها", "manageAdmins")
-  .text("تست 2", "test2")
+  .text("ارسال پیام همگانی", "sendGlobal")
   .row()
-  .text("ارسال پیام همگانی", "sendGlobal");
+  .text("اضافه کردن مانگا", "addManga") // TODO : make this button do something
+  .text("لیست مانگا ها", "mangaList") // TODO : this one too
+  .row()
+  .text("test", "test"); //! REMOVE THIS
 
 const AdminManagementBored = new InlineKeyboard()
   .text("اضافه کردن ادمین", "addAdmin")
@@ -66,6 +84,13 @@ const AdminManagementBored = new InlineKeyboard()
   .text("بازگشت", "panel");
 
 const BackToPanel = new InlineKeyboard().text("بازگشت", "panel");
+
+const addManga_general = new InlineKeyboard()
+  .text("اضافه کردن مجوعه جدید", "addNewManga")
+  .row()
+  .text("اضافه کردن قسمت جدید به مجموعه", "addNewChapter")
+  .row()
+  .text("بازگشت", "panel");
 
 // actions
 bot.callbackQuery("panel", async (ctx) => {
@@ -81,7 +106,7 @@ bot.callbackQuery("addAdmin", (ctx) => {
   ctx.reply("برای اضافه کردن ادمین آیدی عددی ادمین را ارسال کنید", {
     reply_markup: BackToPanel,
   });
-  tempState.waitingForAdminID = true;
+  tempState.waitingForAdminID = ctx.from.id;
 });
 
 bot.callbackQuery("manageAdmins", async (ctx) => {
@@ -96,11 +121,18 @@ bot.callbackQuery("sendGlobal", (ctx) => {
   ctx.reply("پیام خود را برای ارسال همگانی ارسال کنید", {
     reply_markup: BackToPanel,
   });
-  tempState.waitingForGlobalMessage = true;
+  tempState.waitingForGlobalMessage = ctx.from.id;
+});
+
+bot.callbackQuery("addManga", (ctx) => {
+  ctx.deleteMessage();
+  ctx.reply("برای اضافه کردن مانگا گزینه های زیر را انتخاب کنید", {
+    reply_markup: addManga_general,
+  });
 });
 
 bot.on("message", (ctx) => {
-  if (tempState.waitingForGlobalMessage) {
+  if (tempState.waitingForGlobalMessage == ctx.from.id) {
     Users.find({}, async (err, doc) => {
       for (let i = 0; i < doc.length; i++) {
         if (doc[i].ID == ctx.from.id) continue;
@@ -114,8 +146,7 @@ bot.on("message", (ctx) => {
       );
     });
     tempState.waitingForGlobalMessage = false;
-  }
-  if (tempState.waitingForAdminID) {
+  } else if (tempState.waitingForAdminID == ctx.from.id) {
     Admins.findOne({ ID: ctx.message.text }, (err, doc) => {
       if (!doc) {
         Admins.insert(
